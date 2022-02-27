@@ -1,0 +1,19 @@
+# Ignore all files
+*
+
+# Except .gitignore, .py, .ipynb, .md, .bib, .zip files
+!.gitignore
+!*.py
+!*.ipynb
+!*.md
+!*.bib
+!*.zip
+
+# Except LICENSE file
+!LICENSE
+
+# Even if they are in subdirectories
+!*/
+
+# 
+.idea/.gitignore
