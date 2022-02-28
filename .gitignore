@@ -1,10 +1,12 @@
 # Ignore all files
 *
 
-# Except .gitignore, .py, .ipynb, .md, .bib, .zip files
+# Except .gitignore, .py, .ipynb, .png, .jpeg, .md, .bib, .zip files
 !.gitignore
 !*.py
 !*.ipynb
+!*.png
+!*.jpeg
 !*.md
 !*.bib
 !*.zip
