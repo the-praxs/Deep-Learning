@@ -1,4 +1,4 @@
-DATA_HUB = dict()
+DATA_HUB = {}
 DATA_URL = 'http://d2l-data.s3-accelerate.amazonaws.com/'
 
 import collections
@@ -368,8 +368,7 @@ def predict_ch3(net, test_iter, n=6):
     trues = d2l.get_fashion_mnist_labels(y)
     preds = d2l.get_fashion_mnist_labels(d2l.argmax(net(X), axis=1))
     titles = [true +'\n' + pred for true, pred in zip(trues, preds)]
-    d2l.show_images(
-        d2l.reshape(X[0:n], (n, 28, 28)), 1, n, titles=titles[0:n])
+    d2l.show_images(d2l.reshape(X[:n], (n, 28, 28)), 1, n, titles=titles[:n])
 
 def evaluate_loss(net, data_iter, loss):
     """Evaluate the loss of a model on the given dataset.
@@ -383,7 +382,7 @@ def evaluate_loss(net, data_iter, loss):
         metric.add(d2l.reduce_sum(l), d2l.size(l))
     return metric[0] / metric[1]
 
-DATA_HUB = dict()
+DATA_HUB = {}
 DATA_URL = 'http://d2l-data.s3-accelerate.amazonaws.com/'
 
 def download(name, cache_dir=os.path.join('..', 'data')):
@@ -455,7 +454,7 @@ def try_all_gpus():
     Defined in :numref:`sec_use_gpu`"""
     devices = [torch.device(f'cuda:{i}')
              for i in range(torch.cuda.device_count())]
-    return devices if devices else [torch.device('cpu')]
+    return devices or [torch.device('cpu')]
 
 def corr2d(X, K):
     """Compute 2D cross-correlation.
@@ -481,11 +480,7 @@ def evaluate_accuracy_gpu(net, data_iter, device=None):
 
     with torch.no_grad():
         for X, y in data_iter:
-            if isinstance(X, list):
-                # Required for BERT Fine-tuning (to be covered later)
-                X = [x.to(device) for x in X]
-            else:
-                X = X.to(device)
+            X = [x.to(device) for x in X] if isinstance(X, list) else X.to(device)
             y = y.to(device)
             metric.add(d2l.accuracy(net(X), y), d2l.size(y))
     return metric[0] / metric[1]
@@ -495,7 +490,7 @@ def train_ch6(net, train_iter, test_iter, num_epochs, lr, device):
 
     Defined in :numref:`sec_lenet`"""
     def init_weights(m):
-        if type(m) == nn.Linear or type(m) == nn.Conv2d:
+        if type(m) in [nn.Linear, nn.Conv2d]:
             nn.init.xavier_uniform_(m.weight)
     net.apply(init_weights)
     print('training on', device)
@@ -606,14 +601,18 @@ class Vocab:
         return len(self.idx_to_token)
 
     def __getitem__(self, tokens):
-        if not isinstance(tokens, (list, tuple)):
-            return self.token_to_idx.get(tokens, self.unk)
-        return [self.__getitem__(token) for token in tokens]
+        return (
+            [self.__getitem__(token) for token in tokens]
+            if isinstance(tokens, (list, tuple))
+            else self.token_to_idx.get(tokens, self.unk)
+        )
 
     def to_tokens(self, indices):
-        if not isinstance(indices, (list, tuple)):
-            return self.idx_to_token[indices]
-        return [self.idx_to_token[index] for index in indices]
+        return (
+            [self.idx_to_token[index] for index in indices]
+            if isinstance(indices, (list, tuple))
+            else self.idx_to_token[indices]
+        )
 
     @property
     def unk(self):  # Index for the unknown token
@@ -771,15 +770,14 @@ def train_epoch_ch8(net, train_iter, loss, updater, device, use_random_iter):
             # Initialize `state` when either it is the first iteration or
             # using random sampling
             state = net.begin_state(batch_size=X.shape[0], device=device)
+        elif isinstance(net, nn.Module) and not isinstance(state, tuple):
+            # `state` is a tensor for `nn.GRU`
+            state.detach_()
         else:
-            if isinstance(net, nn.Module) and not isinstance(state, tuple):
-                # `state` is a tensor for `nn.GRU`
-                state.detach_()
-            else:
-                # `state` is a tuple of tensors for `nn.LSTM` and
-                # for our custom scratch implementation
-                for s in state:
-                    s.detach_()
+            # `state` is a tuple of tensors for `nn.LSTM` and
+            # for our custom scratch implementation
+            for s in state:
+                s.detach_()
         y = Y.T.reshape(-1)
         X, y = X.to(device), y.to(device)
         y_hat, state = net(X, state)
@@ -851,19 +849,35 @@ class RNNModel(nn.Module):
         return output, state
 
     def begin_state(self, device, batch_size=1):
-        if not isinstance(self.rnn, nn.LSTM):
-            # `nn.GRU` takes a tensor as hidden state
-            return  torch.zeros((self.num_directions * self.rnn.num_layers,
-                                 batch_size, self.num_hiddens),
-                                device=device)
-        else:
-            # `nn.LSTM` takes a tuple of hidden states
-            return (torch.zeros((
-                self.num_directions * self.rnn.num_layers,
-                batch_size, self.num_hiddens), device=device),
-                    torch.zeros((
+        return (
+            (
+                torch.zeros(
+                    (
                         self.num_directions * self.rnn.num_layers,
-                        batch_size, self.num_hiddens), device=device))
+                        batch_size,
+                        self.num_hiddens,
+                    ),
+                    device=device,
+                ),
+                torch.zeros(
+                    (
+                        self.num_directions * self.rnn.num_layers,
+                        batch_size,
+                        self.num_hiddens,
+                    ),
+                    device=device,
+                ),
+            )
+            if isinstance(self.rnn, nn.LSTM)
+            else torch.zeros(
+                (
+                    self.num_directions * self.rnn.num_layers,
+                    batch_size,
+                    self.num_hiddens,
+                ),
+                device=device,
+            )
+        )
 
 d2l.DATA_HUB['fra-eng'] = (d2l.DATA_URL + 'fra-eng.zip',
                            '94646ad1522d915e7b0f9296181140edcf86a4f5')
@@ -1035,8 +1049,7 @@ class MaskedSoftmaxCELoss(nn.CrossEntropyLoss):
         self.reduction='none'
         unweighted_loss = super(MaskedSoftmaxCELoss, self).forward(
             pred.permute(0, 2, 1), label)
-        weighted_loss = (unweighted_loss * weights).mean(dim=1)
-        return weighted_loss
+        return (unweighted_loss * weights).mean(dim=1)
 
 def train_seq2seq(net, data_iter, lr, num_epochs, tgt_vocab, device):
     """Train a model for sequence to sequence.
@@ -1156,20 +1169,20 @@ def masked_softmax(X, valid_lens):
     """Perform softmax operation by masking elements on the last axis.
 
     Defined in :numref:`sec_attention-scoring-functions`"""
-    # `X`: 3D tensor, `valid_lens`: 1D or 2D tensor
     if valid_lens is None:
         return nn.functional.softmax(X, dim=-1)
-    else:
-        shape = X.shape
-        if valid_lens.dim() == 1:
-            valid_lens = torch.repeat_interleave(valid_lens, shape[1])
-        else:
-            valid_lens = valid_lens.reshape(-1)
-        # On the last axis, replace masked elements with a very large negative
-        # value, whose exponentiation outputs 0
-        X = d2l.sequence_mask(X.reshape(-1, shape[-1]), valid_lens,
-                              value=-1e6)
-        return nn.functional.softmax(X.reshape(shape), dim=-1)
+    shape = X.shape
+    valid_lens = (
+        torch.repeat_interleave(valid_lens, shape[1])
+        if valid_lens.dim() == 1
+        else valid_lens.reshape(-1)
+    )
+
+    # On the last axis, replace masked elements with a very large negative
+    # value, whose exponentiation outputs 0
+    X = d2l.sequence_mask(X.reshape(-1, shape[-1]), valid_lens,
+                          value=-1e6)
+    return nn.functional.softmax(X.reshape(shape), dim=-1)
 
 class AdditiveAttention(nn.Module):
     """Additive attention.
@@ -1379,10 +1392,21 @@ class TransformerEncoder(d2l.Encoder):
         self.pos_encoding = d2l.PositionalEncoding(num_hiddens, dropout)
         self.blks = nn.Sequential()
         for i in range(num_layers):
-            self.blks.add_module("block"+str(i),
-                EncoderBlock(key_size, query_size, value_size, num_hiddens,
-                             norm_shape, ffn_num_input, ffn_num_hiddens,
-                             num_heads, dropout, use_bias))
+            self.blks.add_module(
+                f"block{str(i)}",
+                EncoderBlock(
+                    key_size,
+                    query_size,
+                    value_size,
+                    num_hiddens,
+                    norm_shape,
+                    ffn_num_input,
+                    ffn_num_hiddens,
+                    num_heads,
+                    dropout,
+                    use_bias,
+                ),
+            )
 
     def forward(self, X, valid_lens, *args):
         # Since positional encoding values are between -1 and 1, the embedding
@@ -1552,11 +1576,7 @@ def train_batch_ch13(net, X, y, loss, trainer, devices):
     """Train for a minibatch with mutiple GPUs (defined in Chapter 13).
 
     Defined in :numref:`sec_image_augmentation`"""
-    if isinstance(X, list):
-        # Required for BERT fine-tuning (to be covered later)
-        X = [x.to(devices[0]) for x in X]
-    else:
-        X = X.to(devices[0])
+    X = [x.to(devices[0]) for x in X] if isinstance(X, list) else X.to(devices[0])
     y = y.to(devices[0])
     net.train()
     trainer.zero_grad()
@@ -1755,8 +1775,7 @@ def offset_boxes(anchors, assigned_bb, eps=1e-6):
     c_assigned_bb = d2l.box_corner_to_center(assigned_bb)
     offset_xy = 10 * (c_assigned_bb[:, :2] - c_anc[:, :2]) / c_anc[:, 2:]
     offset_wh = 5 * d2l.log(eps + c_assigned_bb[:, 2:] / c_anc[:, 2:])
-    offset = d2l.concat([offset_xy, offset_wh], axis=1)
-    return offset
+    return d2l.concat([offset_xy, offset_wh], axis=1)
 
 def multibox_target(anchors, labels):
     """Label anchor boxes using ground-truth bounding boxes.
@@ -1802,8 +1821,7 @@ def offset_inverse(anchors, offset_preds):
     pred_bbox_xy = (offset_preds[:, :2] * anc[:, 2:] / 10) + anc[:, :2]
     pred_bbox_wh = d2l.exp(offset_preds[:, 2:] / 5) * anc[:, 2:]
     pred_bbox = d2l.concat((pred_bbox_xy, pred_bbox_wh), axis=1)
-    predicted_bbox = d2l.box_center_to_corner(pred_bbox)
-    return predicted_bbox
+    return d2l.box_center_to_corner(pred_bbox)
 
 def nms(boxes, scores, iou_threshold):
     """Sort confidence scores of predicted bounding boxes.
@@ -1885,8 +1903,12 @@ class BananasDataset(torch.utils.data.Dataset):
     Defined in :numref:`sec_object-detection-dataset`"""
     def __init__(self, is_train):
         self.features, self.labels = read_data_bananas(is_train)
-        print('read ' + str(len(self.features)) + (f' training examples' if
-              is_train else f' validation examples'))
+        print(
+            (
+                f'read {len(self.features)}'
+                + (' training examples' if is_train else ' validation examples')
+            )
+        )
 
     def __getitem__(self, idx):
         return (self.features[idx].float(), self.labels[idx])
@@ -1917,7 +1939,7 @@ def read_voc_images(voc_dir, is_train=True):
     with open(txt_fname, 'r') as f:
         images = f.read().split()
     features, labels = [], []
-    for i, fname in enumerate(images):
+    for fname in images:
         features.append(torchvision.io.read_image(os.path.join(
             voc_dir, 'JPEGImages', f'{fname}.jpg')))
         labels.append(torchvision.io.read_image(os.path.join(
@@ -1979,7 +2001,7 @@ class VOCSegDataset(torch.utils.data.Dataset):
                          for feature in self.filter(features)]
         self.labels = self.filter(labels)
         self.colormap2label = voc_colormap2label()
-        print('read ' + str(len(self.features)) + ' examples')
+        print(f'read {len(self.features)} examples')
 
     def normalize_image(self, img):
         return self.transform(img.float() / 255)
@@ -2023,7 +2045,7 @@ def read_csv_labels(fname):
         # Skip the file header line (column name)
         lines = f.readlines()[1:]
     tokens = [l.rstrip().split(',') for l in lines]
-    return dict(((name, label) for name, label in tokens))
+    return dict(tokens)
 
 def copyfile(filename, target_dir):
     """Copy a file into a target directory.
@@ -2248,8 +2270,7 @@ class TokenEmbedding:
     def __getitem__(self, tokens):
         indices = [self.token_to_idx.get(token, self.unknown_idx)
                    for token in tokens]
-        vecs = self.idx_to_vec[d2l.tensor(indices)]
-        return vecs
+        return self.idx_to_vec[d2l.tensor(indices)]
 
     def __len__(self):
         return len(self.idx_to_token)
@@ -2317,8 +2338,7 @@ class MaskLM(nn.Module):
         batch_idx = torch.repeat_interleave(batch_idx, num_pred_positions)
         masked_X = X[batch_idx, pred_positions]
         masked_X = masked_X.reshape((batch_size, num_pred_positions, -1))
-        mlm_Y_hat = self.mlp(masked_X)
-        return mlm_Y_hat
+        return self.mlp(masked_X)
 
 class NextSentencePred(nn.Module):
     """The next sentence prediction task of BERT.
@@ -2405,7 +2425,7 @@ def _replace_mlm_tokens(tokens, candidate_pred_positions, num_mlm_preds,
     """Defined in :numref:`sec_bert-dataset`"""
     # Make a new copy of tokens for the input of a masked language model,
     # where the input may contain replaced '<mask>' or random tokens
-    mlm_input_tokens = [token for token in tokens]
+    mlm_input_tokens = list(tokens)
     pred_positions_and_labels = []
     # Shuffle for getting 15% random tokens for prediction in the masked
     # language modeling task
@@ -2417,13 +2437,10 @@ def _replace_mlm_tokens(tokens, candidate_pred_positions, num_mlm_preds,
         # 80% of the time: replace the word with the '<mask>' token
         if random.random() < 0.8:
             masked_token = '<mask>'
+        elif random.random() < 0.5:
+            masked_token = tokens[mlm_pred_position]
         else:
-            # 10% of the time: keep the word unchanged
-            if random.random() < 0.5:
-                masked_token = tokens[mlm_pred_position]
-            # 10% of the time: replace the word with a random word
-            else:
-                masked_token = random.choice(vocab.idx_to_token)
+            masked_token = random.choice(vocab.idx_to_token)
         mlm_input_tokens[mlm_pred_position] = masked_token
         pred_positions_and_labels.append(
             (mlm_pred_position, tokens[mlm_pred_position]))
@@ -2431,14 +2448,10 @@ def _replace_mlm_tokens(tokens, candidate_pred_positions, num_mlm_preds,
 
 def _get_mlm_data_from_tokens(tokens, vocab):
     """Defined in :numref:`subsec_prepare_mlm_data`"""
-    candidate_pred_positions = []
-    # `tokens` is a list of strings
-    for i, token in enumerate(tokens):
-        # Special tokens are not predicted in the masked language modeling
-        # task
-        if token in ['<cls>', '<sep>']:
-            continue
-        candidate_pred_positions.append(i)
+    candidate_pred_positions = [
+        i for i, token in enumerate(tokens) if token not in ['<cls>', '<sep>']
+    ]
+
     # 15% of random tokens are predicted in the masked language modeling task
     num_mlm_preds = max(1, round(len(tokens) * 0.15))
     mlm_input_tokens, pred_positions_and_labels = _replace_mlm_tokens(
@@ -2632,7 +2645,7 @@ class SNLIDataset(torch.utils.data.Dataset):
         self.premises = self._pad(all_premise_tokens)
         self.hypotheses = self._pad(all_hypothesis_tokens)
         self.labels = torch.tensor(dataset[2])
-        print('read ' + str(len(self.premises)) + ' examples')
+        print(f'read {len(self.premises)} examples')
 
     def _pad(self, lines):
         return torch.tensor([d2l.truncate_pad(
