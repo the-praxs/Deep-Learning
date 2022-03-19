@@ -1,4 +1,4 @@
-DATA_HUB = dict()
+DATA_HUB = {}
 DATA_URL = 'http://d2l-data.s3-accelerate.amazonaws.com/'
 
 import collections
@@ -359,8 +359,7 @@ def predict_ch3(net, test_iter, n=6):
     trues = d2l.get_fashion_mnist_labels(y)
     preds = d2l.get_fashion_mnist_labels(d2l.argmax(net(X), axis=1))
     titles = [true +'\n' + pred for true, pred in zip(trues, preds)]
-    d2l.show_images(
-        d2l.reshape(X[0:n], (n, 28, 28)), 1, n, titles=titles[0:n])
+    d2l.show_images(d2l.reshape(X[:n], (n, 28, 28)), 1, n, titles=titles[:n])
 
 def evaluate_loss(net, data_iter, loss):
     """Evaluate the loss of a model on the given dataset.
@@ -372,7 +371,7 @@ def evaluate_loss(net, data_iter, loss):
         metric.add(d2l.reduce_sum(l), d2l.size(l))
     return metric[0] / metric[1]
 
-DATA_HUB = dict()
+DATA_HUB = {}
 DATA_URL = 'http://d2l-data.s3-accelerate.amazonaws.com/'
 
 def download(name, cache_dir=os.path.join('..', 'data')):
@@ -444,7 +443,7 @@ def try_all_gpus():
     Defined in :numref:`sec_use_gpu`"""
     num_gpus = len(tf.config.experimental.list_physical_devices('GPU'))
     devices = [tf.device(f'/GPU:{i}') for i in range(num_gpus)]
-    return devices if devices else [tf.device('/CPU:0')]
+    return devices or [tf.device('/CPU:0')]
 
 def corr2d(X, K):
     """Compute 2D cross-correlation."""
@@ -575,14 +574,18 @@ class Vocab:
         return len(self.idx_to_token)
 
     def __getitem__(self, tokens):
-        if not isinstance(tokens, (list, tuple)):
-            return self.token_to_idx.get(tokens, self.unk)
-        return [self.__getitem__(token) for token in tokens]
+        return (
+            [self.__getitem__(token) for token in tokens]
+            if isinstance(tokens, (list, tuple))
+            else self.token_to_idx.get(tokens, self.unk)
+        )
 
     def to_tokens(self, indices):
-        if not isinstance(indices, (list, tuple)):
-            return self.idx_to_token[indices]
-        return [self.idx_to_token[index] for index in indices]
+        return (
+            [self.idx_to_token[index] for index in indices]
+            if isinstance(indices, (list, tuple))
+            else self.idx_to_token[indices]
+        )
 
     @property
     def unk(self):  # Index for the unknown token
@@ -980,8 +983,7 @@ class MaskedSoftmaxCELoss(tf.keras.losses.Loss):
         label_one_hot = tf.one_hot(label, depth=pred.shape[-1])
         unweighted_loss = tf.keras.losses.CategoricalCrossentropy(
             from_logits=True, reduction='none')(label_one_hot, pred)
-        weighted_loss = tf.reduce_mean((unweighted_loss*weights), axis=1)
-        return weighted_loss
+        return tf.reduce_mean((unweighted_loss*weights), axis=1)
 
 def train_seq2seq(net, data_iter, lr, num_epochs, tgt_vocab, device):
     """Train a model for sequence to sequence.
@@ -994,7 +996,7 @@ def train_seq2seq(net, data_iter, lr, num_epochs, tgt_vocab, device):
         timer = d2l.Timer()
         metric = d2l.Accumulator(2)  # Sum of training loss, no. of tokens
         for batch in data_iter:
-            X, X_valid_len, Y, Y_valid_len = [x for x in batch]
+            X, X_valid_len, Y, Y_valid_len = list(batch)
             bos = tf.reshape(tf.constant([tgt_vocab['<bos>']] * Y.shape[0]),
                              shape=(-1, 1))
             dec_input = tf.concat([bos, Y[:, :-1]], 1)  # Teacher forcing
@@ -1085,20 +1087,19 @@ def masked_softmax(X, valid_lens):
     """Perform softmax operation by masking elements on the last axis.
 
     Defined in :numref:`sec_attention-scoring-functions`"""
-    # `X`: 3D tensor, `valid_lens`: 1D or 2D tensor
     if valid_lens is None:
         return tf.nn.softmax(X, axis=-1)
-    else:
-        shape = X.shape
-        if len(valid_lens.shape) == 1:
-            valid_lens = tf.repeat(valid_lens, repeats=shape[1])
+    shape = X.shape
+    valid_lens = (
+        tf.repeat(valid_lens, repeats=shape[1])
+        if len(valid_lens.shape) == 1
+        else tf.reshape(valid_lens, shape=-1)
+    )
 
-        else:
-            valid_lens = tf.reshape(valid_lens, shape=-1)
-        # On the last axis, replace masked elements with a very large negative
-        # value, whose exponentiation outputs 0
-        X = d2l.sequence_mask(tf.reshape(X, shape=(-1, shape[-1])), valid_lens, value=-1e6)
-        return tf.nn.softmax(tf.reshape(X, shape=shape), axis=-1)
+    # On the last axis, replace masked elements with a very large negative
+    # value, whose exponentiation outputs 0
+    X = d2l.sequence_mask(tf.reshape(X, shape=(-1, shape[-1])), valid_lens, value=-1e6)
+    return tf.nn.softmax(tf.reshape(X, shape=shape), axis=-1)
 
 class AdditiveAttention(tf.keras.layers.Layer):
     """Additive attention.
